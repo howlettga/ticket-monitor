@@ -17,7 +17,7 @@ from telegram_bot import check_telegram_registrations, send_telegram_notificatio
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def get_random_headers():
+def get_random_headers(user_agent: str = None):
     """Return randomized headers to avoid detection"""
     user_agents = [
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -28,7 +28,7 @@ def get_random_headers():
     ]
     
     return {
-        'User-Agent': random.choice(user_agents),
+        'User-Agent': user_agent or random.choice(user_agents),
         'Accept': 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
@@ -103,51 +103,15 @@ def check_festival_passes_resale():
         session.cookies.set('session_id', f'monitor_{random.randint(100000, 999999)}')
         seed_cookies_from_env(session)
         
-        # Step 1: Navigate to the event page with external referer
-        logger.info("Navigating to event page with external referer...")
-        nav_headers = get_random_headers()
-        nav_headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
-        nav_headers['Referer'] = FESTIVAL_SITE_REFERER
-        nav_headers['Sec-GPC'] = '1'
-        nav_headers['Sec-Fetch-Dest'] = 'document'
-        nav_headers['Sec-Fetch-Mode'] = 'navigate'
-        nav_headers['Sec-Fetch-Site'] = 'cross-site'
-        nav_headers['Sec-Fetch-User'] = '?1'
-        nav_headers['Upgrade-Insecure-Requests'] = '1'
-        # Origin typically not sent for top-level navigations
-        nav_headers.pop('Origin', None)
-        nav_response = session.get(EVENT_PAGE_URL, headers=nav_headers, timeout=30)
-        logger.info(f"Event page status: {nav_response.status_code}")
-        # Log presence of key cookies after navigation
-        try:
-            has_datadome = 'datadome' in session.cookies.get_dict(domain='.tixr.com')
-        except Exception:
-            has_datadome = 'datadome' in session.cookies.get_dict()
-        logger.info(f"Cookies after nav - datadome present: {bool(has_datadome)}")
-        if nav_response.status_code != 200:
-            logger.warning("Failed to load event page, continuing anyway...")
-        
-        # Step 2: Request page requirements
-        time.sleep(random.uniform(0.8, 1.5))
-        logger.info("Requesting page requirements...")
-        req_headers = get_random_headers()
-        req_headers['Accept'] = '*/*'
-        req_headers['Referer'] = EVENT_PAGE_URL
-        req_headers['X-Requested-With'] = 'XMLHttpRequest'
-        req_headers['X-NewRelic-ID'] = 'Ug8CWVVXGwcEUlFVDwM='
-        req_headers['Sec-GPC'] = '1'
-        req_headers['Sec-Fetch-Dest'] = 'empty'
-        req_headers['Sec-Fetch-Mode'] = 'cors'
-        req_headers['Sec-Fetch-Site'] = 'same-origin'
-        requirements_url = build_requirements_url()
-        req_response = session.get(requirements_url, headers=req_headers, timeout=30)
-        logger.info(f"Requirements response status: {req_response.status_code}")
+        # Direct API approach: skip navigation and requirements
+        fixed_user_agent = os.getenv('TIXR_USER_AGENT') or 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'
+        logger.info("Skipping navigation; calling API directly with cloudscraper")
         
         # Make the API call
         logger.info("Making API request to get event data...")
-        api_headers = get_random_headers()
+        api_headers = get_random_headers(user_agent=fixed_user_agent)
         api_headers['Accept'] = 'application/json, text/javascript, */*; q=0.01'
-        api_headers['Referer'] = EVENT_PAGE_URL
+        # No Referer since we are going direct; keep XHR-like headers
         api_headers['X-Requested-With'] = 'XMLHttpRequest'
         api_headers['X-NewRelic-ID'] = 'Ug8CWVVXGwcEUlFVDwM='
         api_headers['Sec-GPC'] = '1'
