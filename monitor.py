@@ -1,5 +1,9 @@
 import requests
-import cloudscraper  # Optional
+import urllib.parse
+try:
+    import cloudscraper  # Optional
+except ImportError:  # pragma: no cover
+    cloudscraper = None
 import time
 import random
 import os
@@ -254,7 +258,7 @@ def try_api_fallback_methods(session, api_url):
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'application/json',
             'Origin': 'https://www.tixr.com',
-            'Referer': 'https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703'
+            'Referer': EVENT_PAGE_URL
         }
         
         time.sleep(random.uniform(3, 6))
@@ -278,7 +282,7 @@ def try_api_fallback_methods(session, api_url):
         time.sleep(delay)
         
         # Try to establish session more naturally
-        event_page_url = "https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
+        event_page_url = EVENT_PAGE_URL
         page_headers = get_random_headers()
         page_headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         
