@@ -2,24 +2,69 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import smtplib
+import time
+import random
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from telegram_bot import check_telegram_registrations, send_telegram_notification
 
+def get_random_headers():
+    """Return randomized headers to avoid detection"""
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/120.0'
+    ]
+    
+    return {
+        'User-Agent': random.choice(user_agents),
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Cache-Control': 'max-age=0'
+    }
+
 def check_tixr_resale():
-    # Replace with your actual Tixr event URL
+    """Check for resale tickets with improved anti-detection measures"""
     url = "https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
     
+    # Create a session to maintain cookies
+    session = requests.Session()
+    
     try:
-        # Make request to the page
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers)
+        # Add random delay to seem more human
+        time.sleep(random.uniform(1, 3))
+        
+        # Get randomized headers
+        headers = get_random_headers()
+        
+        # Make request with session
+        response = session.get(url, headers=headers, timeout=30)
+        
+        print(f"Response status: {response.status_code}")
+        
+        if response.status_code == 403:
+            print("❌ Access denied (403). Tixr is blocking the request.")
+            # Try alternative approaches
+            return try_alternative_methods(session, url)
+        
         response.raise_for_status()
         
         # Parse HTML
         soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Debug: Print page title to confirm we got the right page
+        title = soup.find('title')
+        if title:
+            print(f"Page title: {title.get_text().strip()}")
         
         # Find the Festival Passes section and check for resale
         festival_passes_h2 = soup.find("h2", string="Festival Passes")
@@ -32,18 +77,88 @@ def check_tixr_resale():
                 element = None
         else:
             element = None
+            # Try alternative selectors
+            element = soup.select_one("[state='RESALE']")
         
         if element:
             print("🎉 RESALE TICKETS AVAILABLE!")
             send_telegram_notification(url)
-            send_notification(url)  # Also send email as backup
+            send_notification(url)
             return True
         else:
             print("No resale tickets yet - still sold out")
             return False
             
+    except requests.exceptions.RequestException as e:
+        print(f"Request error: {e}")
+        return False
     except Exception as e:
         print(f"Error checking page: {e}")
+        return False
+    finally:
+        session.close()
+
+def try_alternative_methods(session, url):
+    """Try alternative methods when getting 403"""
+    
+    # Method 1: Try with minimal headers
+    try:
+        print("Trying with minimal headers...")
+        minimal_headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; TicketMonitor/1.0)'
+        }
+        response = session.get(url, headers=minimal_headers, timeout=30)
+        if response.status_code == 200:
+            print("✅ Success with minimal headers")
+            return parse_response(response)
+    except Exception as e:
+        print(f"Minimal headers failed: {e}")
+    
+    # Method 2: Try without any custom headers
+    try:
+        print("Trying with default headers...")
+        response = session.get(url, timeout=30)
+        if response.status_code == 200:
+            print("✅ Success with default headers")
+            return parse_response(response)
+    except Exception as e:
+        print(f"Default headers failed: {e}")
+    
+    # Method 3: Try with a longer delay
+    try:
+        print("Trying with longer delay...")
+        time.sleep(random.uniform(5, 10))
+        headers = get_random_headers()
+        response = session.get(url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            print("✅ Success with delay")
+            return parse_response(response)
+    except Exception as e:
+        print(f"Delayed request failed: {e}")
+    
+    print("❌ All alternative methods failed")
+    return False
+
+def parse_response(response):
+    """Parse the response to check for resale tickets"""
+    try:
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Look for resale indicators
+        resale_element = soup.select_one("[state='RESALE']")
+        if resale_element:
+            print("🎉 RESALE TICKETS FOUND!")
+            return True
+        
+        # Alternative check - look for sold out vs available
+        sold_out_indicators = soup.find_all(text=lambda text: text and 'sold out' in text.lower())
+        if not sold_out_indicators:
+            print("🤔 No 'sold out' text found - tickets might be available")
+            # You might want to send a notification here too
+        
+        return False
+    except Exception as e:
+        print(f"Error parsing response: {e}")
         return False
 
 def send_notification(event_url):
