@@ -4,7 +4,7 @@ import os
 import smtplib
 from email.mime.text import MimeText
 from email.mime.multipart import MimeMultipart
-from twilio.rest import Client
+from telegram_bot import check_telegram_registrations, send_telegram_notification
 
 def check_tixr_resale():
     # Replace with your actual Tixr event URL
@@ -35,7 +35,7 @@ def check_tixr_resale():
         
         if element:
             print("🎉 RESALE TICKETS AVAILABLE!")
-            send_sms_notification(url)
+            send_telegram_notification(url)
             send_notification(url)  # Also send email as backup
             return True
         else:
@@ -45,44 +45,6 @@ def check_tixr_resale():
     except Exception as e:
         print(f"Error checking page: {e}")
         return False
-
-def send_sms_notification(event_url):
-    """Send SMS notification to multiple phones when resale tickets are found"""
-    
-    # Get Twilio credentials from environment variables (set in GitHub secrets)
-    account_sid = os.getenv('TWILIO_ACCOUNT_SID')
-    auth_token = os.getenv('TWILIO_AUTH_TOKEN')
-    twilio_phone = os.getenv('TWILIO_PHONE_NUMBER')  # Your Twilio phone number
-    recipient_phones = os.getenv('RECIPIENT_PHONES')  # Comma-separated phone numbers
-    
-    if not all([account_sid, auth_token, twilio_phone, recipient_phones]):
-        print("Twilio credentials not configured")
-        return
-    
-    # Split the comma-separated phone numbers and clean them
-    phone_numbers = [phone.strip() for phone in recipient_phones.split(',')]
-    
-    try:
-        # Create Twilio client
-        client = Client(account_sid, auth_token)
-        
-        message_body = f"🎟️ FESTIVAL PASSES RESALE AVAILABLE!\n\nCheck now: {event_url}\n\nHurry - they go fast!"
-        
-        # Send SMS to each phone number
-        for phone in phone_numbers:
-            if phone:  # Skip empty strings
-                try:
-                    message = client.messages.create(
-                        body=message_body,
-                        from_=twilio_phone,
-                        to=phone
-                    )
-                    print(f"SMS sent to {phone}! Message SID: {message.sid}")
-                except Exception as e:
-                    print(f"Failed to send SMS to {phone}: {e}")
-        
-    except Exception as e:
-        print(f"Failed to send SMS: {e}")
 
 def send_notification(event_url):
     """Send email notification when resale tickets are found"""
@@ -124,4 +86,10 @@ def send_notification(event_url):
         print(f"Failed to send email: {e}")
 
 if __name__ == "__main__":
+    # First check for new registrations
+    print("Checking for Telegram registrations...")
+    check_telegram_registrations()
+    
+    # Then check for resale tickets
+    print("Checking for resale tickets...")
     check_tixr_resale()
