@@ -2,8 +2,8 @@ import requests
 from bs4 import BeautifulSoup
 import os
 import smtplib
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from telegram_bot import check_telegram_registrations, send_telegram_notification
 
 def check_tixr_resale():
@@ -59,7 +59,7 @@ def send_notification(event_url):
         return
     
     # Create message
-    message = MimeMultipart()
+    message = MIMEMultipart()
     message["From"] = sender_email
     message["To"] = recipient_email
     message["Subject"] = "🎟️ Tixr Resale Tickets Available!"
@@ -72,7 +72,7 @@ def send_notification(event_url):
     Hurry - they might go fast!
     """
     
-    message.attach(MimeText(body, "plain"))
+    message.attach(MIMEText(body, "plain"))
     
     try:
         # Send email
