@@ -39,12 +39,20 @@ def check_tixr_resale():
     # Create a session to maintain cookies
     session = requests.Session()
     
+    # Add some persistence data to look more like a real browser
+    session.cookies.set('session_id', f'gh_monitor_{random.randint(100000, 999999)}')
+    
     try:
-        # Add random delay to seem more human
-        time.sleep(random.uniform(1, 3))
+        # Longer random delay - be more patient
+        initial_delay = random.uniform(3, 8)
+        print(f"Waiting {initial_delay:.1f} seconds before request...")
+        time.sleep(initial_delay)
         
         # Get randomized headers
         headers = get_random_headers()
+        
+        # Add referrer to look more natural
+        headers['Referer'] = 'https://www.google.com/'
         
         # Make request with session
         response = session.get(url, headers=headers, timeout=30)
@@ -124,17 +132,38 @@ def try_alternative_methods(session, url):
     except Exception as e:
         print(f"Default headers failed: {e}")
     
-    # Method 3: Try with a longer delay
+    # Method 3: Try with a much longer delay and different approach
     try:
-        print("Trying with longer delay...")
-        time.sleep(random.uniform(5, 10))
-        headers = get_random_headers()
-        response = session.get(url, headers=headers, timeout=30)
-        if response.status_code == 200:
-            print("✅ Success with delay")
-            return parse_response(response)
+        print("Trying with much longer delay and clean session...")
+        session.close()  # Close old session
+        session = requests.Session()  # Fresh session
+        
+        # Much longer delay
+        delay = random.uniform(15, 30)
+        print(f"Waiting {delay:.1f} seconds...")
+        time.sleep(delay)
+        
+        # Try to mimic coming from the main Tixr page first
+        main_page_headers = get_random_headers()
+        main_page_headers['Referer'] = 'https://www.tixr.com/'
+        
+        # Visit main page first
+        main_response = session.get('https://www.tixr.com/', headers=main_page_headers, timeout=30)
+        if main_response.status_code == 200:
+            print("✅ Successfully visited main page")
+            
+            # Now try the event page
+            time.sleep(random.uniform(2, 5))
+            event_headers = get_random_headers() 
+            event_headers['Referer'] = 'https://www.tixr.com/'
+            
+            response = session.get(url, headers=event_headers, timeout=30)
+            if response.status_code == 200:
+                print("✅ Success after visiting main page first")
+                return parse_response(response)
+    
     except Exception as e:
-        print(f"Delayed request failed: {e}")
+        print(f"Main page approach failed: {e}")
     
     print("❌ All alternative methods failed")
     return False
