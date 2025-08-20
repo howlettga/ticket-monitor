@@ -1,4 +1,87 @@
-import requests
+# Method 4: Try API-first approach as standalone
+    try:
+        print("Trying standalone API approach...")
+        session.close()
+        session = requests.Session()
+        
+        time.sleep(random.uniform(3, 7))
+        
+        # Make API call first
+        api_url = "https://www.tixr.com/api/events?eventName=seven%20stars&page=1&pageSize=20"
+        api_headers = get_random_headers()
+        api_headers['Accept'] = 'application/json, text/plain, */*'
+        api_headers['Referer'] = 'https://www.tixr.com/'
+        
+        api_response = session.get(api_url, headers=api_headers, timeout=30)
+        print(f"Standalone API status: {api_response.status_code}")
+        
+        if api_response.status_code == 200:
+            # Try to get ticket info directly from API if possible
+            try:
+                api_data = api_response.json()
+                print(f"API returned {len(api_data.get('events', []))} events")
+                # You could potentially check for resale info in the API response here
+            except:
+                pass
+                
+            # Now try event page
+            time.sleep(random.uniform(1, 3))
+            event_headers = get_random_headers()
+            event_headers['Referer'] = 'https://www.tixr.com/'
+            
+            response = session.get(url, headers=event_headers, timeout=30)
+            if response.status_code == 200:
+                print("✅ Success with standalone API approach")
+                return parse_response(response)
+                
+    except Exception as e:
+        print(f"Standalone API approach failed: {e}")
+    try:
+        print("Trying alternative detection method...")
+        
+        # Sometimes the page loads but tickets info is loaded via JavaScript
+        # Try to detect this and look for different indicators
+        
+        session.close()
+        session = requests.Session()
+        time.sleep(random.uniform(5, 10))
+        
+        headers = get_random_headers()
+        headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+        headers['Referer'] = 'https://www.google.com/search?q=tixr+100x+valley+seven+stars'
+        
+        response = session.get(url, headers=headers, timeout=30)
+        
+        print(f"Final attempt status: {response.status_code}")
+        
+        if response.status_code == 200:
+            print("✅ Success with Google search referer")
+            return parse_response(response)
+        elif response.status_code == 403:
+            print("Still getting 403 - may need to try different times or approach")
+        else:
+            print(f"Unexpected status code: {response.status_code}")
+            
+    except Exception as e:
+        print(f"Final attempt failed: {e}")
+    
+    # Method 5: Check if we can get any useful info even from blocked responses
+    try:
+        print("Checking if any partial data is available...")
+        headers = {'User-Agent': 'curl/7.68.0'}  # Try with curl user agent
+        response = session.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 403:
+            # Sometimes 403 pages still contain some info
+            if len(response.content) > 1000:  # If we got substantial content
+                print("Got substantial content even with 403 - checking for clues...")
+                soup = BeautifulSoup(response.content, 'html.parser')
+                title = soup.find('title')
+                if title:
+                    print(f"403 page title: {title.get_text().strip()}")
+                    
+    except Exception as e:
+        print(f"Partial data check failed: {e}")import requests
 from bs4 import BeautifulSoup
 import os
 import smtplib
@@ -152,15 +235,74 @@ def try_alternative_methods(session, url):
         if main_response.status_code == 200:
             print("✅ Successfully visited main page")
             
-            # Now try the event page
-            time.sleep(random.uniform(2, 5))
-            event_headers = get_random_headers() 
-            event_headers['Referer'] = 'https://www.tixr.com/'
+            # Now call their API like the real site does
+            time.sleep(random.uniform(1, 3))
+            api_url = "https://www.tixr.com/api/events?eventName=seven%20stars&page=1&pageSize=20"
             
-            response = session.get(url, headers=event_headers, timeout=30)
-            if response.status_code == 200:
-                print("✅ Success after visiting main page first")
-                return parse_response(response)
+            api_headers = get_random_headers()
+            api_headers['Referer'] = 'https://www.tixr.com/'
+            api_headers['Accept'] = 'application/json, text/plain, */*'
+            api_headers['X-Requested-With'] = 'XMLHttpRequest'
+            
+            print("Making API call...")
+            api_response = session.get(api_url, headers=api_headers, timeout=30)
+            print(f"API response status: {api_response.status_code}")
+            
+            if api_response.status_code == 200:
+                print("✅ API call successful")
+                
+                # Now try the event page with more realistic navigation
+                time.sleep(random.uniform(1, 3))
+                event_headers = get_random_headers() 
+                event_headers['Referer'] = 'https://www.tixr.com/'
+                
+                response = session.get(url, headers=event_headers, timeout=30)
+                if response.status_code == 200:
+                    print("✅ Success after API call + navigation")
+                    return parse_response(response)
+                else:
+                    print(f"Event page still blocked: {response.status_code}")
+            else:
+                print(f"API call failed: {api_response.status_code}")
+                # Continue with fallback approach
+            
+            # Now try the event page with more realistic navigation
+            time.sleep(random.uniform(2, 5))
+            
+            # First try to visit the group page
+            group_url = "https://www.tixr.com/groups/100x"
+            group_headers = get_random_headers()
+            group_headers['Referer'] = 'https://www.tixr.com/'
+            
+            group_response = session.get(group_url, headers=group_headers, timeout=30)
+            if group_response.status_code == 200:
+                print("✅ Successfully visited group page")
+                time.sleep(random.uniform(1, 3))
+                
+                # Now try the event page
+                event_headers = get_random_headers() 
+                event_headers['Referer'] = group_url  # Come from group page
+                event_headers['Cache-Control'] = 'no-cache'
+                event_headers['Pragma'] = 'no-cache'
+                
+                response = session.get(url, headers=event_headers, timeout=30)
+                if response.status_code == 200:
+                    print("✅ Success after realistic navigation path")
+                    return parse_response(response)
+                else:
+                    print(f"Event page returned: {response.status_code}")
+            else:
+                print(f"Group page returned: {group_response.status_code}")
+                
+                # Fallback: try event page directly from main page
+                time.sleep(random.uniform(1, 3))
+                event_headers = get_random_headers() 
+                event_headers['Referer'] = 'https://www.tixr.com/'
+                
+                response = session.get(url, headers=event_headers, timeout=30)
+                if response.status_code == 200:
+                    print("✅ Success with direct approach from main page")
+                    return parse_response(response)
     
     except Exception as e:
         print(f"Main page approach failed: {e}")
