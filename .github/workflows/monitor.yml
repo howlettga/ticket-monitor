@@ -28,17 +28,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
-    # - name: Verify cloudscraper install
-    #   run: |
-    #     pip show cloudscraper || true
-    #     python - <<'PY'
-    #     try:
-    #         import cloudscraper
-    #         print('cloudscraper present:', True)
-    #         print('cloudscraper version:', getattr(cloudscraper, '__version__', 'unknown'))
-    #     except Exception as e:
-    #         print('cloudscraper not importable:', e)
-    #     PY
 
     - name: Run monitoring script
       env:

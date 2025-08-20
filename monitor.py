@@ -46,7 +46,7 @@ def create_scraper_session():
         scraper = cloudscraper.create_scraper(
             browser={
                 'browser': 'chrome',
-                'platform': 'macos',
+                'platform': 'darwin',
                 'desktop': True
             }
         )
