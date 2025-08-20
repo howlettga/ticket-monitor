@@ -50,7 +50,9 @@ def create_scraper_session():
                 'desktop': True
             }
         )
+        logger.info("Using cloudscraper session")
         return scraper
+    logger.info("cloudscraper not available; falling back to requests Session")
     return requests.Session()
 
 # Event-specific constants and helpers
@@ -72,10 +74,14 @@ def seed_cookies_from_env(session: requests.Session) -> None:
         return
     try:
         parts = [p.strip() for p in raw_cookie.split(';') if p.strip()]
+        seeded_names = []
         for part in parts:
             if '=' in part:
                 name, value = part.split('=', 1)
                 session.cookies.set(name.strip(), value.strip(), domain='.tixr.com')
+                seeded_names.append(name.strip())
+        if seeded_names:
+            logger.info(f"Seeded cookies from env: {', '.join(seeded_names)}")
     except Exception:
         # Best effort; ignore malformed cookie strings
         pass
@@ -85,6 +91,7 @@ def check_festival_passes_resale():
     
     api_url = EVENT_API_URL
     session = create_scraper_session()
+    logger.info(f"HTTP session: {session.__class__.__name__}")
     
     try:
         # Add random delay to be respectful
@@ -111,6 +118,12 @@ def check_festival_passes_resale():
         nav_headers.pop('Origin', None)
         nav_response = session.get(EVENT_PAGE_URL, headers=nav_headers, timeout=30)
         logger.info(f"Event page status: {nav_response.status_code}")
+        # Log presence of key cookies after navigation
+        try:
+            has_datadome = 'datadome' in session.cookies.get_dict(domain='.tixr.com')
+        except Exception:
+            has_datadome = 'datadome' in session.cookies.get_dict()
+        logger.info(f"Cookies after nav - datadome present: {bool(has_datadome)}")
         if nav_response.status_code != 200:
             logger.warning("Failed to load event page, continuing anyway...")
         
