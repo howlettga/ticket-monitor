@@ -116,8 +116,7 @@ def get_random_headers():
     }
 
 def check_tixr_resale():
-    """Check for resale tickets with improved anti-detection measures"""
-    url = "https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
+    """Check for resale tickets using Tixr's API endpoints"""
     
     # Create a session to maintain cookies
     session = requests.Session()
@@ -131,63 +130,132 @@ def check_tixr_resale():
         print(f"Waiting {initial_delay:.1f} seconds before request...")
         time.sleep(initial_delay)
         
-        # Get randomized headers
+        # First, visit the main page to establish session
         headers = get_random_headers()
-        
-        # Add referrer to look more natural
         headers['Referer'] = 'https://www.google.com/'
         
-        # Make request with session
-        response = session.get(url, headers=headers, timeout=30)
+        main_response = session.get('https://www.tixr.com/', headers=headers, timeout=30)
+        print(f"Main page status: {main_response.status_code}")
         
-        print(f"Response status: {response.status_code}")
-        
-        if response.status_code == 403:
-            print("❌ Access denied (403). Tixr is blocking the request.")
-            # Try alternative approaches
-            return try_alternative_methods(session, url)
-        
-        response.raise_for_status()
-        
-        # Parse HTML
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Debug: Print page title to confirm we got the right page
-        title = soup.find('title')
-        if title:
-            print(f"Page title: {title.get_text().strip()}")
-        
-        # Find the Festival Passes section and check for resale
-        festival_passes_h2 = soup.find("h2", string="Festival Passes")
-        if festival_passes_h2:
-            # Get the next sibling div, then find the first li with state="RESALE"
-            next_div = festival_passes_h2.find_next_sibling("div")
-            if next_div:
-                element = next_div.select_one("ul li:first-child [state='RESALE']")
-            else:
-                element = None
-        else:
-            element = None
-            # Try alternative selectors
-            element = soup.select_one("[state='RESALE']")
-        
-        if element:
-            print("🎉 RESALE TICKETS AVAILABLE!")
-            send_telegram_notification(url)
-            send_notification(url)
-            return True
-        else:
-            print("No resale tickets yet - still sold out")
-            return False
+        if main_response.status_code == 200:
+            print("✅ Successfully visited main page")
             
-    except requests.exceptions.RequestException as e:
-        print(f"Request error: {e}")
-        return False
+            # Small delay
+            time.sleep(random.uniform(1, 3))
+            
+            # Now call the API endpoints like the real site does
+            api_headers = get_random_headers()
+            api_headers['Accept'] = 'application/json, text/plain, */*'
+            api_headers['Referer'] = 'https://www.tixr.com/'
+            api_headers['X-Requested-With'] = 'XMLHttpRequest'
+            
+            # First API call - page requirements
+            requirements_url = "https://www.tixr.com/api/page/requirements?url=/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
+            print("Calling requirements API...")
+            req_response = session.get(requirements_url, headers=api_headers, timeout=30)
+            print(f"Requirements API status: {req_response.status_code}")
+            
+            if req_response.status_code == 200:
+                print("✅ Requirements API successful")
+                
+                # Small delay before next API call
+                time.sleep(random.uniform(0.5, 2))
+                
+                # Second API call - event details
+                event_api_url = "https://www.tixr.com/api/events/135703"
+                print("Calling event API...")
+                event_response = session.get(event_api_url, headers=api_headers, timeout=30)
+                print(f"Event API status: {event_response.status_code}")
+                
+                if event_response.status_code == 200:
+                    print("✅ Event API successful")
+                    
+                    # Parse the JSON response to check for resale tickets
+                    try:
+                        event_data = event_response.json()
+                        return check_resale_in_json(event_data)
+                    except Exception as e:
+                        print(f"Error parsing JSON: {e}")
+                        return False
+                else:
+                    print(f"❌ Event API failed with status {event_response.status_code}")
+                    return try_html_fallback(session)
+            else:
+                print(f"❌ Requirements API failed with status {req_response.status_code}")
+                return try_html_fallback(session)
+        else:
+            print(f"❌ Main page failed with status {main_response.status_code}")
+            return try_html_fallback(session)
+            
     except Exception as e:
-        print(f"Error checking page: {e}")
-        return False
+        print(f"Error in API approach: {e}")
+        return try_html_fallback(session)
     finally:
         session.close()
+
+def check_resale_in_json(event_data):
+    """Check for resale tickets in the JSON API response"""
+    try:
+        print("Analyzing event data for resale tickets...")
+        
+        # Print some debug info about what we received
+        if 'name' in event_data:
+            print(f"Event: {event_data['name']}")
+        
+        # Look for ticket types or variants
+        ticket_sections = []
+        
+        # Check common API response structures
+        for key in ['ticketTypes', 'variants', 'tickets', 'products']:
+            if key in event_data:
+                ticket_sections.extend(event_data[key] if isinstance(event_data[key], list) else [event_data[key]])
+        
+        # Check for any tickets that might be resale
+        for ticket in ticket_sections:
+            if isinstance(ticket, dict):
+                # Look for resale indicators
+                state = ticket.get('state', '').upper()
+                status = ticket.get('status', '').upper()
+                availability = ticket.get('availability', '').upper()
+                ticket_type = ticket.get('type', '').upper()
+                
+                print(f"Ticket found - State: {state}, Status: {status}, Type: {ticket_type}")
+                
+                if any(indicator in [state, status, availability, ticket_type] for indicator in ['RESALE', 'SECONDARY', 'RESOLD']):
+                    print("🎉 RESALE TICKETS FOUND IN API!")
+                    url = "https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
+                    send_telegram_notification(url)
+                    send_notification(url)
+                    return True
+        
+        print("No resale tickets found in API response")
+        return False
+        
+    except Exception as e:
+        print(f"Error checking JSON for resale: {e}")
+        return False
+
+def try_html_fallback(session):
+    """Fallback to HTML scraping if API fails"""
+    print("Falling back to HTML scraping...")
+    
+    url = "https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
+    
+    try:
+        headers = get_random_headers()
+        headers['Referer'] = 'https://www.tixr.com/'
+        
+        response = session.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            return parse_response(response)
+        else:
+            print(f"HTML fallback failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"HTML fallback error: {e}")
+        return False
 
 def try_alternative_methods(session, url):
     """Try alternative methods when getting 403"""
