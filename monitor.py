@@ -1,4 +1,5 @@
 import requests
+import cloudscraper  # Optional
 import time
 import random
 import os
@@ -28,18 +29,58 @@ def get_random_headers():
         'Accept-Language': 'en-US,en;q=0.9',
         'Accept-Encoding': 'gzip, deflate, br',
         'DNT': '1',
+        'Origin': 'https://www.tixr.com',
         'Connection': 'keep-alive',
-        'Referer': 'https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703',
         'Sec-Fetch-Dest': 'empty',
         'Sec-Fetch-Mode': 'cors',
         'Sec-Fetch-Site': 'same-origin'
     }
 
+def create_scraper_session():
+    """Create a Cloudflare-capable session to reduce 403 responses"""
+    if cloudscraper is not None:
+        scraper = cloudscraper.create_scraper(
+            browser={
+                'browser': 'chrome',
+                'platform': 'macos',
+                'desktop': True
+            }
+        )
+        return scraper
+    return requests.Session()
+
+# Event-specific constants and helpers
+EVENT_PATH = "/groups/100x/events/valley-of-the-seven-stars-135703"
+EVENT_QUERY = "col=&a=L&filter=55:NA|56:NA&sort=RECOMMENDED"
+EVENT_PAGE_URL = f"https://www.tixr.com{EVENT_PATH}?{EVENT_QUERY}"
+FESTIVAL_SITE_REFERER = "https://www.sevenstarsfest.com/"
+EVENT_API_URL = "https://www.tixr.com/api/events/135703"
+
+def build_requirements_url():
+    url_param = urllib.parse.quote(EVENT_PATH, safe="")
+    qp_param = urllib.parse.quote("?" + EVENT_QUERY, safe="")
+    return f"https://www.tixr.com/api/page/requirements?url={url_param}&queryParams={qp_param}"
+
+def seed_cookies_from_env(session: requests.Session) -> None:
+    """Optionally seed session cookies from an env var containing a raw Cookie header."""
+    raw_cookie = os.getenv('TIXR_COOKIES') or os.getenv('TIXR_COOKIE_HEADER')
+    if not raw_cookie:
+        return
+    try:
+        parts = [p.strip() for p in raw_cookie.split(';') if p.strip()]
+        for part in parts:
+            if '=' in part:
+                name, value = part.split('=', 1)
+                session.cookies.set(name.strip(), value.strip(), domain='.tixr.com')
+    except Exception:
+        # Best effort; ignore malformed cookie strings
+        pass
+
 def check_festival_passes_resale():
     """Check for resale tickets in Festival Passes collection via API"""
     
-    api_url = "https://www.tixr.com/api/events/135703"
-    session = requests.Session()
+    api_url = EVENT_API_URL
+    session = create_scraper_session()
     
     try:
         # Add random delay to be respectful
@@ -49,25 +90,53 @@ def check_festival_passes_resale():
         
         # Set up session with realistic browsing behavior
         session.cookies.set('session_id', f'monitor_{random.randint(100000, 999999)}')
+        seed_cookies_from_env(session)
         
-        # First visit the main page to establish session context
-        logger.info("Establishing session context...")
-        main_headers = get_random_headers()
-        main_headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
-        main_headers['Referer'] = 'https://www.google.com/'
+        # Step 1: Navigate to the event page with external referer
+        logger.info("Navigating to event page with external referer...")
+        nav_headers = get_random_headers()
+        nav_headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8'
+        nav_headers['Referer'] = FESTIVAL_SITE_REFERER
+        nav_headers['Sec-GPC'] = '1'
+        nav_headers['Sec-Fetch-Dest'] = 'document'
+        nav_headers['Sec-Fetch-Mode'] = 'navigate'
+        nav_headers['Sec-Fetch-Site'] = 'cross-site'
+        nav_headers['Sec-Fetch-User'] = '?1'
+        nav_headers['Upgrade-Insecure-Requests'] = '1'
+        # Origin typically not sent for top-level navigations
+        nav_headers.pop('Origin', None)
+        nav_response = session.get(EVENT_PAGE_URL, headers=nav_headers, timeout=30)
+        logger.info(f"Event page status: {nav_response.status_code}")
+        if nav_response.status_code != 200:
+            logger.warning("Failed to load event page, continuing anyway...")
         
-        main_response = session.get('https://www.tixr.com/', headers=main_headers, timeout=30)
-        logger.info(f"Main page status: {main_response.status_code}")
-        
-        if main_response.status_code != 200:
-            logger.warning("Failed to establish session context, continuing anyway...")
-        
-        # Small delay before API call
-        time.sleep(random.uniform(1, 2))
+        # Step 2: Request page requirements
+        time.sleep(random.uniform(0.8, 1.5))
+        logger.info("Requesting page requirements...")
+        req_headers = get_random_headers()
+        req_headers['Accept'] = '*/*'
+        req_headers['Referer'] = EVENT_PAGE_URL
+        req_headers['X-Requested-With'] = 'XMLHttpRequest'
+        req_headers['X-NewRelic-ID'] = 'Ug8CWVVXGwcEUlFVDwM='
+        req_headers['Sec-GPC'] = '1'
+        req_headers['Sec-Fetch-Dest'] = 'empty'
+        req_headers['Sec-Fetch-Mode'] = 'cors'
+        req_headers['Sec-Fetch-Site'] = 'same-origin'
+        requirements_url = build_requirements_url()
+        req_response = session.get(requirements_url, headers=req_headers, timeout=30)
+        logger.info(f"Requirements response status: {req_response.status_code}")
         
         # Make the API call
         logger.info("Making API request to get event data...")
         api_headers = get_random_headers()
+        api_headers['Accept'] = 'application/json, text/javascript, */*; q=0.01'
+        api_headers['Referer'] = EVENT_PAGE_URL
+        api_headers['X-Requested-With'] = 'XMLHttpRequest'
+        api_headers['X-NewRelic-ID'] = 'Ug8CWVVXGwcEUlFVDwM='
+        api_headers['Sec-GPC'] = '1'
+        api_headers['Sec-Fetch-Dest'] = 'empty'
+        api_headers['Sec-Fetch-Mode'] = 'cors'
+        api_headers['Sec-Fetch-Site'] = 'same-origin'
         
         response = session.get(api_url, headers=api_headers, timeout=30)
         logger.info(f"API response status: {response.status_code}")
@@ -155,8 +224,8 @@ def process_api_response(data):
                 logger.info(f"Available resale - ID: {resale['id']}, State: {resale['state']}")
             
             # Send notifications
-            event_url = "https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
-            send_telegram_notification(event_url, f"Found {len(available_resales)} Festival Passes resale tickets!")
+            event_url = EVENT_PAGE_URL
+            send_telegram_notification(event_url)
             send_notification(event_url, len(available_resales))
             return True
         else:
@@ -182,8 +251,10 @@ def try_api_fallback_methods(session, api_url):
     try:
         logger.info("Trying with minimal headers...")
         minimal_headers = {
-            'User-Agent': 'Mozilla/5.0 (compatible; TicketMonitor/1.0)',
-            'Accept': 'application/json'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json',
+            'Origin': 'https://www.tixr.com',
+            'Referer': 'https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703'
         }
         
         time.sleep(random.uniform(3, 6))
@@ -200,7 +271,7 @@ def try_api_fallback_methods(session, api_url):
     try:
         logger.info("Trying with fresh session and longer delay...")
         session.close()
-        session = requests.Session()
+        session = create_scraper_session()
         
         delay = random.uniform(10, 20)
         logger.info(f"Waiting {delay:.1f} seconds...")
@@ -237,7 +308,7 @@ def try_web_scraping_fallback(session):
     from bs4 import BeautifulSoup
     
     try:
-        url = "https://www.tixr.com/groups/100x/events/valley-of-the-seven-stars-cosmic-campout-135703"
+        url = EVENT_PAGE_URL
         headers = get_random_headers()
         headers['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         
@@ -254,9 +325,8 @@ def try_web_scraping_fallback(session):
             
             if resale_elements:
                 logger.info("🎉 Found resale indicators in HTML!")
-                event_url = url
-                send_telegram_notification(event_url, "Found resale tickets (via web scraping)")
-                send_notification(event_url, 1)
+                send_telegram_notification(url)
+                send_notification(url, 1)
                 return True
             else:
                 logger.info("No resale indicators found in HTML")
