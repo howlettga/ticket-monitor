@@ -62,14 +62,21 @@ EVENT_PAGE_URL = f"https://www.tixr.com{EVENT_PATH}?{EVENT_QUERY}"
 FESTIVAL_SITE_REFERER = "https://www.sevenstarsfest.com/"
 EVENT_API_URL = "https://www.tixr.com/api/events/135703"
 
+# Hardcoded Tixr cookie header (provided by user). Used for browser/API calls directly.
+HARDCODED_TIXR_COOKIE = (
+    "datadome=9tOn8r66JI~dxdna4R_rBVxIUuedCJ~qGPAO8y89shYpo0A8haAODup6hLsCd~Ecp~rc76PPgKoHcnOf9K_FqHhAgdnVulRMz51mrSAOfu5V~Q7fvRNzkSsOryaxVTS1; "
+    "tsession=NDVlNjJhNWEtOGFjNS00MjJhLThiY2EtNWI4ODk5MjE5ZTgx; "
+    "clientSessionId=abdb2824-d26f-485b-91b1-01bc9d732fdd; "
+    "allow_functional_cookies=1; allow_analytics_cookies=1; allow_marketing_cookies=1"
+)
+
 def build_requirements_url():
     url_param = urllib.parse.quote(EVENT_PATH, safe="")
     qp_param = urllib.parse.quote("?" + EVENT_QUERY, safe="")
     return f"https://www.tixr.com/api/page/requirements?url={url_param}&queryParams={qp_param}"
 
-def seed_cookies_from_env(session: requests.Session) -> None:
-    """Optionally seed session cookies from an env var containing a raw Cookie header."""
-    raw_cookie = os.getenv('TIXR_COOKIES') or os.getenv('TIXR_COOKIE_HEADER')
+def seed_cookies_from_string(session: requests.Session, raw_cookie: str) -> None:
+    """Seed session cookies from a raw Cookie header string."""
     if not raw_cookie:
         return
     try:
@@ -81,10 +88,83 @@ def seed_cookies_from_env(session: requests.Session) -> None:
                 session.cookies.set(name.strip(), value.strip(), domain='.tixr.com')
                 seeded_names.append(name.strip())
         if seeded_names:
-            logger.info(f"Seeded cookies from env: {', '.join(seeded_names)}")
+            logger.info(f"Seeded cookies: {', '.join(seeded_names)}")
     except Exception:
         # Best effort; ignore malformed cookie strings
         pass
+
+def parse_cookie_header_to_playwright(raw_cookie: str):
+    """Convert a Cookie header string into a list of Playwright cookie dicts."""
+    cookies = []
+    if not raw_cookie:
+        return cookies
+    try:
+        parts = [p.strip() for p in raw_cookie.split(';') if p.strip()]
+        for part in parts:
+            if '=' in part:
+                name, value = part.split('=', 1)
+                cookies.append({
+                    'name': name.strip(),
+                    'value': value.strip(),
+                    'domain': '.tixr.com',
+                    'path': '/',
+                    'secure': True,
+                    'httpOnly': False
+                })
+    except Exception:
+        return []
+    return cookies
+
+def fetch_api_with_playwright(api_url: str, raw_cookie: str) -> bool:
+    """Use Playwright to call the API directly, seeding cookies if provided. No HTML navigation."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as e:
+        logger.warning(f"Playwright not available ({e}), falling back to HTTP client")
+        return None
+
+    try:
+        with sync_playwright() as p:
+            browser_name = os.getenv('PLAYWRIGHT_BROWSER', 'firefox').lower()
+            launch = {
+                'firefox': p.firefox,
+                'chromium': p.chromium,
+                'webkit': p.webkit
+            }.get(browser_name, p.firefox)
+            browser = launch.launch(headless=True)
+            context = browser.new_context()
+
+            # Seed cookies
+            if raw_cookie:
+                pw_cookies = parse_cookie_header_to_playwright(raw_cookie)
+                if pw_cookies:
+                    context.add_cookies(pw_cookies)
+                    logger.info(f"Playwright seeded cookies: {[c['name'] for c in pw_cookies]}")
+
+            # Consistent headers
+            fixed_user_agent = os.getenv('TIXR_USER_AGENT') or 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'
+            context.set_extra_http_headers({
+                'User-Agent': fixed_user_agent,
+                'Accept': 'application/json, text/javascript, */*; q=0.01',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-origin'
+            })
+
+            # Direct API request
+            r = context.request.get(api_url)
+            logger.info(f"Playwright API status: {r.status}")
+            if r.ok:
+                data = r.json()
+                browser.close()
+                return process_api_response(data)
+
+            browser.close()
+            return False
+    except Exception as e:
+        logger.error(f"Playwright API call failed: {e}")
+        return False
 
 def check_festival_passes_resale():
     """Check for resale tickets in Festival Passes collection via API"""
@@ -101,14 +181,20 @@ def check_festival_passes_resale():
         
         # Set up session with realistic browsing behavior
         session.cookies.set('session_id', f'monitor_{random.randint(100000, 999999)}')
-        seed_cookies_from_env(session)
+        # Seed the HTTP session as well (fallback path)
+        seed_cookies_from_string(session, HARDCODED_TIXR_COOKIE)
         
         # Direct API approach: skip navigation and requirements
         fixed_user_agent = os.getenv('TIXR_USER_AGENT') or 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:142.0) Gecko/20100101 Firefox/142.0'
         logger.info("Skipping navigation; calling API directly with cloudscraper")
         
-        # Make the API call
-        logger.info("Making API request to get event data...")
+        # Try Playwright first with hardcoded cookie; otherwise use HTTP client
+        logger.info("Using Playwright to request API directly with hardcoded cookie")
+        pw_result = fetch_api_with_playwright(api_url, HARDCODED_TIXR_COOKIE)
+        if pw_result is not None:
+            return pw_result
+
+        logger.info("Making API request to get event data (HTTP client)...")
         api_headers = get_random_headers(user_agent=fixed_user_agent)
         api_headers['Accept'] = 'application/json, text/javascript, */*; q=0.01'
         # No Referer since we are going direct; keep XHR-like headers
@@ -118,18 +204,18 @@ def check_festival_passes_resale():
         api_headers['Sec-Fetch-Dest'] = 'empty'
         api_headers['Sec-Fetch-Mode'] = 'cors'
         api_headers['Sec-Fetch-Site'] = 'same-origin'
-        
+
         response = session.get(api_url, headers=api_headers, timeout=30)
         logger.info(f"API response status: {response.status_code}")
         
         if response.status_code == 200:
             return process_api_response(response.json())
         elif response.status_code == 403:
-            logger.warning("Got 403 - trying fallback methods...")
-            return try_api_fallback_methods(session, api_url)
+            logger.warning("Got 403 (direct API). Skipping HTML fallbacks per config.")
+            return False
         else:
-            logger.error(f"API request failed with status: {response.status_code}")
-            return try_web_scraping_fallback(session)
+            logger.error(f"API request failed with status: {response.status_code}. Skipping HTML fallbacks per config.")
+            return False
             
     except requests.exceptions.RequestException as e:
         logger.error(f"Request error: {e}")
